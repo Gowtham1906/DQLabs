@@ -62,9 +62,10 @@ RUN pip install -r requirements.txt
 COPY dags/agent_requirements_dev.txt agent_requirements.txt
 RUN pip install -r agent_requirements.txt
 
-# Install agent whl distributions
-COPY agent_distributions /opt/airflow/agent_distributions
-RUN pip install /opt/airflow/agent_distributions/*.whl
+# Install agent whl distributions (directory may be empty in CI)
+RUN mkdir -p /opt/airflow/agent_distributions
+COPY agent_distributions/ /opt/airflow/agent_distributions/
+RUN if ls /opt/airflow/agent_distributions/*.whl 1>/dev/null 2>&1; then pip install /opt/airflow/agent_distributions/*.whl; fi
 RUN pip install --upgrade typing-extensions
 RUN pip install --upgrade cryptography
 RUN pip install --upgrade pyopenssl
