@@ -1,0 +1,325 @@
+# =============================================================================
+# DQLabs — Docker Compose
+# =============================================================================
+# Purpose : Local development and image build validation.
+#           This file is NOT used for production deployments (use Helm/K8s).
+#
+# Usage:
+#   # 1. Copy and configure environment
+#   cp infra/docker/.env.example infra/docker/.env
+#   # edit .env with your values
+#
+#   # 2. Build the image
+#   docker compose -f infra/docker/docker-compose.yml build
+#
+#   # 3. Initialise the database (run once)
+#   docker compose -f infra/docker/docker-compose.yml run --rm airflow-init
+#
+#   # 4. Start all services
+#   docker compose -f infra/docker/docker-compose.yml up -d
+#
+#   # 5. Tail logs
+#   docker compose -f infra/docker/docker-compose.yml logs -f
+#
+# Airflow UI : http://localhost:8080
+# Flower UI  : http://localhost:5555
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Build configuration — shared across all Airflow service definitions
+# -----------------------------------------------------------------------------
+x-airflow-build: &airflow-build
+  context: ../            # Build context is infra/ (parent of docker/)
+  dockerfile: docker/Dockerfile
+  args:
+    AIRFLOW_VERSION: ${AIRFLOW_VERSION:-2.8.1}
+    PYTHON_VERSION: ${PYTHON_VERSION:-3.11}
+    AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+    AIRFLOW_GID: ${AIRFLOW_GID:-50000}
+    INSTALL_JAVA: ${INSTALL_JAVA:-false}
+    IMAGE_TAG: ${IMAGE_TAG:-latest}
+
+# -----------------------------------------------------------------------------
+# Common Airflow service definition — extended by each component
+# -----------------------------------------------------------------------------
+x-airflow-common: &airflow-common
+  image: dqlabs-airflow:${IMAGE_TAG:-latest}
+  build: *airflow-build
+  platform: linux/amd64
+  environment: &airflow-env
+    # Core
+    AIRFLOW__CORE__EXECUTOR: ${AIRFLOW__CORE__EXECUTOR:-CeleryExecutor}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: ${AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG:-16}
+
+    # Database
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-airflow-db}:5432/${POSTGRES_DB:-airflow}
+
+    # Celery
+    AIRFLOW__CELERY__BROKER_URL: redis://:@${REDIS_HOST:-redis}:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-airflow-db}:5432/${POSTGRES_DB:-airflow}
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: ${AIRFLOW__CELERY__WORKER_CONCURRENCY:-4}
+
+    # Webserver
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+    AIRFLOW__WEBSERVER__RBAC: "true"
+    AIRFLOW__WEBSERVER__WORKER_CLASS: gevent
+
+    # Logging
+    AIRFLOW__LOGGING__LOGGING_LEVEL: ${AIRFLOW__LOGGING__LOGGING_LEVEL:-INFO}
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: ${AIRFLOW_HOME:-/opt/airflow}/logs
+
+    # API auth
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+
+    # Health check
+    AIRFLOW__SCHEDULER__HEALTH_CHECK_THRESHOLD: "30"
+
+    # Connectivity for entrypoint readiness checks
+    POSTGRES_HOST: ${POSTGRES_HOST:-airflow-db}
+    POSTGRES_PORT: "5432"
+    REDIS_HOST: ${REDIS_HOST:-redis}
+    REDIS_PORT: "6379"
+
+  volumes:
+    # DAGs are volume-mounted for live reload during local development.
+    # In production (K8s), DAGs are baked into the image or synced via git-sync.
+    - ../airflow/dags:/opt/airflow/dags:ro
+    - airflow-logs:/opt/airflow/logs
+    - airflow-plugins:/opt/airflow/plugins
+    - airflow-data:/opt/airflow/data
+
+  networks:
+    - airflow-net
+
+  depends_on: &airflow-depends-on
+    airflow-db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+  restart: unless-stopped
+
+  # Resource limits — mirror K8s requests/limits for local parity
+  deploy:
+    resources:
+      limits:
+        cpus: "2.0"
+        memory: 4G
+      reservations:
+        cpus: "0.5"
+        memory: 1G
+
+# =============================================================================
+# Services
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 14 — Airflow metadata database
+  # Alpine variant reduces image size by ~150 MB vs standard postgres:14
+  # ---------------------------------------------------------------------------
+  airflow-db:
+    image: postgres:14-alpine
+    container_name: dqlabs-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-airflow}
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT_EXTERNAL:-5437}:5432"
+    networks:
+      - airflow-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-airflow} -d ${POSTGRES_DB:-airflow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — Celery message broker
+  # Alpine variant; no persistent volume needed for local dev.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: dqlabs-redis
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    expose:
+      - 6379
+    networks:
+      - airflow-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # airflow-init — DB migration + admin user creation
+  # Runs to completion then exits (service_completed_successfully).
+  # Re-run manually if the schema needs to be re-initialised.
+  # ---------------------------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-init
+    command: init
+    environment:
+      <<: *airflow-env
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+      AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@dqlabs.io}
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # Webserver — Airflow UI + REST API (port 8080)
+  # ---------------------------------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-webserver
+    command: webserver
+    ports:
+      - "${AIRFLOW_WEBSERVER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # Scheduler — Parses DAGs and queues tasks to Celery
+  # ---------------------------------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"'
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # Worker — Celery task executor (runs actual DQ workloads)
+  # Scale horizontally: docker compose up --scale airflow-worker=3
+  # ---------------------------------------------------------------------------
+  airflow-worker:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-worker
+    command: worker
+    environment:
+      <<: *airflow-env
+      # Required for graceful shutdown of Celery workers
+      DUMB_INIT_SETSID: "0"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # Triggerer — Handles deferred tasks (async sensors, TaskFlow deferral)
+  # ---------------------------------------------------------------------------
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-triggerer
+    command: triggerer
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"'
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # ---------------------------------------------------------------------------
+  # Flower — Celery worker monitoring UI (port 5555)
+  # ---------------------------------------------------------------------------
+  flower:
+    <<: *airflow-common
+    container_name: dqlabs-flower
+    command: flower
+    ports:
+      - "${FLOWER_PORT:-5555}:5555"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+# =============================================================================
+# Named volumes — persisted across container restarts
+# =============================================================================
+volumes:
+  postgres-db-volume:
+  airflow-logs:
+  airflow-plugins:
+  airflow-data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  airflow-net:
+    driver: bridge

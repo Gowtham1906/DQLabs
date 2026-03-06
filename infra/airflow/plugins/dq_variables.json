@@ -1,0 +1,9 @@
+{
+    "dq_endpoint_url": "",
+    "dq_client_id": "",
+    "dq_client_secret": "",
+    "dq_connection_name": "",
+    "dq_allowed_dags": "",
+    "dq_excluded_dags": "",
+    "dq_extract_source_code": ""
+}

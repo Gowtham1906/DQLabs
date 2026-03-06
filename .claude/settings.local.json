@@ -1,0 +1,151 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)"
+    ],
+    "deny": [
+      "Read(environments/**)",
+      "Read(environments/*)",
+      "Read(**/environments/**)",
+      "Read(**/environments/*)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/.git/**)",
+      "Read(**/.ssh/**)",
+      "Read(**/.aws/**)",
+      "Read(**/.kube/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.pfx)",
+      "Read(**/*.p12)",
+      "Read(**/*.jks)",
+      "Read(**/*.keystore)",
+      "Read(**/*.enc)",
+      "Read(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+      "Read(**/secrets.yml)",
+      "Read(**/secrets.yaml)",
+      "Read(**/credentials)",
+      "Read(**/credentials.*)",
+      "Grep(environments/**)",
+      "Grep(environments/*)",
+      "Grep(**/environments/**)",
+      "Grep(**/environments/*)",
+      "Glob(environments/**)",
+      "Glob(environments/*)",
+      "Glob(**/environments/**)",
+      "Glob(**/environments/*)",
+      "Glob(**/.env)",
+      "Glob(**/.env.*)",
+      "Glob(**/.git/**)",
+      "Glob(**/.ssh/**)",
+      "Glob(**/.aws/**)",
+      "Glob(**/*.pem)",
+      "Glob(**/*.key)",
+      "Edit(environments/**)",
+      "Edit(**/environments/**)",
+      "Edit(**/.env)",
+      "Edit(**/.env.*)",
+      "Edit(**/.git/**)",
+      "Edit(**/*.pem)",
+      "Edit(**/*.key)",
+      "Edit(**/*.enc)",
+      "Write(environments/**)",
+      "Write(**/environments/**)",
+      "Write(**/.env)",
+      "Write(**/.env.*)",
+      "Write(**/.git/**)",
+      "Write(**/*.pem)",
+      "Write(**/*.key)",
+      "Write(**/*.enc)",
+      "Bash(cat:*environments*)",
+      "Bash(less:*environments*)",
+      "Bash(more:*environments*)",
+      "Bash(head:*environments*)",
+      "Bash(tail:*environments*)",
+      "Bash(type:*environments*)",
+      "Bash(Get-Content:*environments*)",
+      "Bash(cat:*.env*)",
+      "Bash(less:*.env*)",
+      "Bash(more:*.env*)",
+      "Bash(head:*.env*)",
+      "Bash(tail:*.env*)",
+      "Bash(type:*.env*)",
+      "Bash(Get-Content:*.env*)",
+      "Bash(cat:*.pem*)",
+      "Bash(cat:*.key*)",
+      "Bash(cat:*.enc*)",
+      "Bash(cat:*id_rsa*)",
+      "Bash(cat:*id_ed25519*)",
+      "Bash(cat:*credentials*)",
+      "Bash(cat:*.git/*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_env_read.ps1\""
+          }
+        ]
+      },
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_env_grep.ps1\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_bash_sensitive.ps1\""
+          }
+        ]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_env_read.ps1\""
+          }
+        ]
+      },
+      {
+        "matcher": "ListDir",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_env_read.ps1\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_write_sensitive.ps1\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_write_sensitive.ps1\""
+          }
+        ]
+      }
+    ]
+  }
+}

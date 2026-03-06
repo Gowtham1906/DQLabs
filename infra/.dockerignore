@@ -1,0 +1,69 @@
+# =============================================================================
+# Docker build context exclusions — infra/.dockerignore
+# Build context root: infra/
+# =============================================================================
+
+# --- Secrets (never send to build daemon) ------------------------------------
+**/.env
+**/*.env
+!**/airflow.env.example
+**/environments/
+**/.env.enc
+
+# --- Python cache / build artifacts ------------------------------------------
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.egg-info/
+**/dist/
+**/build/
+**/.eggs/
+
+# --- Tests (not needed in the image) -----------------------------------------
+**/tests/
+**/test_*.py
+**/*_test.py
+
+# --- Version control ----------------------------------------------------------
+**/.git/
+**/.gitignore
+**/.gitattributes
+
+# --- Development / editor tooling --------------------------------------------
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/.DS_Store
+**/Thumbs.db
+
+# --- CI/CD config (not needed in image) --------------------------------------
+../../buildspec*.yml
+../../Jenkinsfile
+
+# --- Large binary artifacts (add back selectively via Dockerfile COPY) --------
+# JDBC JARs and ODBC binaries are too large for general build context.
+# Add them back by removing the relevant lines below if your connectors need them.
+**/jars/
+
+# --- Other Dockerfiles (we only use infra/docker/Dockerfile) -----------------
+**/Dockerfile
+!docker/Dockerfile
+
+# --- Kubernetes manifests (not needed in image) -------------------------------
+k8s/
+airfloweks/
+hosted-airflow/
+
+# --- Slackbot (separate image, separate build context) -----------------------
+# (Already excluded by being outside infra/, but kept for clarity)
+
+# --- Log files ----------------------------------------------------------------
+**/*.log
+**/logs/
+
+# --- Temporary files ----------------------------------------------------------
+**/tmp/
+**/*.tmp
+**/tmp_files/

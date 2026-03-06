@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: airflow
+  labels:
+    service: postgres
+    version: v1
+spec:
+  # replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 5%
+  selector:
+    matchLabels:
+      service: postgres
+      version: v1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5432"
+      labels:
+        service: postgres
+        version: v1
+        app: postgres
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: service
+                      operator: In
+                      values:
+                        - postgres
+                topologyKey: "kubernetes.io/hostname"
+              weight: 100
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - preference:
+                matchExpressions:
+                  - key: cloud.google.com/gke-preemptible
+                    operator: Exists
+              weight: 100
+      containers:
+        - name: postgres
+          image: postgres:14
+          imagePullPolicy: Always
+          ports:
+            - name: backend-port
+              containerPort: 5432
+              hostPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready",  "-U", "dqlabs"]
+            initialDelaySeconds: 15
+            timeoutSeconds: 5
+          resources:
+            limits:
+              memory: 1Gi
+              cpu: 500m
+            requests:
+              memory: 500Mi
+              cpu: 250m
+          env:
+            - name: POSTGRES_USER
+              value: dqlabs
+            - name: POSTGRES_PASSWORD
+              value: Intel1234
+            - name: POSTGRES_DB
+              value: DQLABS
+            - name: POSTGRES_SCHEMA
+              value: core
+            - name: POSTGRES_PORT
+              value: "5432"
+          volumeMounts:
+            - name: postgres-db-volume
+              mountPath: /var/lib/postgresql/data
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 30"]
+          terminationMessagePath: /termination-log
+          terminationMessagePolicy: File
+      volumes:
+        - name: postgres-db-volume
+          hostPath:
+            path: /postgresdata

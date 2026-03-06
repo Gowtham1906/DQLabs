@@ -1,0 +1,32 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - cd infra/airflow/dags
+      - cp environments/mwaa.env .env
+      - rm -rf dist/ build/
+      - pip install pkutils
+      - python setup.py bdist_wheel
+      - cd dist
+      - chmod -R 755 ./dqlabs-2.0-py3-none-any.whl
+      - zip -r plugins.zip ./dqlabs-2.0-py3-none-any.whl
+  build:
+    commands:
+      - aws s3 cp plugins.zip s3://mwaa-dags-dev/
+      - cd ../
+      - rm -rf dist
+      - rm -rf setup.py
+      - rm -rf dqlabs
+      - rm -rf build
+      - rm -rf connection_file
+      - rm -rf dqlabs.egg-info
+      - rm -rf environments
+      - rm -rf .env *.env
+      - cd ..
+      - aws s3 rm s3://mwaa-dags-dev/dags --recursive
+      - aws s3 cp dags s3://mwaa-dags-dev/dags --recursive
+      - aws s3 cp mwaa_requirements.txt s3://mwaa-dags-dev/requirements.txt
+artifacts:
+  files:
+    - '**/*'

@@ -1,0 +1,61 @@
+# =============================================================================
+# DQLabs — Pull Request Validation
+# =============================================================================
+# Runs on every PR to main or develop.
+# Validates the Docker build without pushing to any registry.
+# Acts as a required status check — PRs cannot merge if this fails.
+# =============================================================================
+
+name: PR Validate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "infra/airflow/**"
+      - "infra/docker/**"
+      - ".github/workflows/**"
+
+concurrency:
+  group: pr-validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  AIRFLOW_VERSION: "2.8.1"
+  PYTHON_VERSION:  "3.11"
+
+jobs:
+  validate-build:
+    name: Validate Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build only — no push, no registry login required
+      - name: Build image (validation)
+        uses: docker/build-push-action@v6
+        with:
+          context:   ./infra
+          file:      ./infra/docker/Dockerfile
+          platforms: linux/amd64
+          push:      false
+          build-args: |
+            AIRFLOW_VERSION=${{ env.AIRFLOW_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            IMAGE_TAG=pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          provenance: false
+
+      - name: PR build result
+        run: |
+          echo "## PR Validation Passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Docker image built successfully for PR #${{ github.event.pull_request.number }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image was **not** pushed to any registry." >> "$GITHUB_STEP_SUMMARY"

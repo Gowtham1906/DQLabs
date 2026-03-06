@@ -1,0 +1,32 @@
+# Secrets and credentials - NEVER commit these
+**/.env
+**/*.env
+*.env
+infra/airflow/dags/environments/
+infra/airflow/dags/dqlabs/.env
+infra/airflow/dags/connection_file/
+slackbot/scripts/build*.sh
+slackbot/scripts/update*.sh
+
+# Encrypted env (safe to commit if needed)
+# *.env.enc
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+dist/
+build/
+*.egg-info/
+.eggs/
+*.whl
+
+# Airflow
+logs/
+airflow.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

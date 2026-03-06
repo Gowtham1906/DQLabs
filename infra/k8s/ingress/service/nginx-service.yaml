@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    meta.helm.sh/release-name: nginx-ingress
+    meta.helm.sh/release-namespace: ingress
+  finalizers:
+  - service.kubernetes.io/load-balancer-cleanup
+  labels:
+    app.kubernetes.io/instance: nginx-ingress
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: nginx-ingress-nginx-ingress
+    helm.sh/chart: nginx-ingress-0.14.0
+  name: nginx-ingress-nginx-ingress
+  namespace: ingress
+spec:
+  externalTrafficPolicy: Local
+  healthCheckNodePort: 31855
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http
+    nodePort: 32694
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  - name: https
+    nodePort: 31992
+    port: 443
+    protocol: TCP
+    targetPort: 443
+  selector:
+    app: nginx-ingress-nginx-ingress
+  sessionAffinity: None
+  type: LoadBalancer
