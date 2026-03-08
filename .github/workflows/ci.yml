@@ -85,7 +85,9 @@ jobs:
         run: |
           SHORT_SHA="${GITHUB_SHA::8}"
           BRANCH_TAG="${GITHUB_REF_NAME//\//-}"
-          IMAGE_BASE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          # GHCR requires lowercase — github.repository_owner may have uppercase letters
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_BASE="${{ env.REGISTRY }}/${OWNER}/${{ env.IMAGE_NAME }}"
           FULL_IMAGE="${IMAGE_BASE}:${SHORT_SHA}"
 
           echo "short_sha=${SHORT_SHA}"   >> "$GITHUB_OUTPUT"
