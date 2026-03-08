@@ -1,0 +1,121 @@
+# =============================================================================
+# DQLabs Airflow – Docker Build Context Exclusions
+# All docker builds use the repo root as build context:
+#   docker build -f infra/docker/Dockerfile.xxx .
+# This file controls what is excluded from the build context
+# to keep context transfer fast and prevent leaking secrets.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Version control
+# ---------------------------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+
+# ---------------------------------------------------------------------------
+# Secrets and credentials — NEVER include in build context
+# ---------------------------------------------------------------------------
+**/.env
+**/.env.*
+**/connection_file/
+**/credentials/
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# ---------------------------------------------------------------------------
+# Python build artifacts
+# ---------------------------------------------------------------------------
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.egg-info/
+**/dist/
+**/build/
+**/.eggs/
+
+# ---------------------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------------------
+**/.venv/
+**/venv/
+**/env/
+
+# ---------------------------------------------------------------------------
+# Test files (not needed in production images)
+# ---------------------------------------------------------------------------
+test/
+**/tests/
+**/*_test.py
+**/*test*.py
+infra/airflow/tests/
+
+# ---------------------------------------------------------------------------
+# Development tooling
+# ---------------------------------------------------------------------------
+.claude/
+.DS_Store
+Makefile
+**/.pre-commit-config.yaml
+pyproject.toml
+**/*.md
+!infra/airflow/dags/README.md
+
+# ---------------------------------------------------------------------------
+# Log files and temporary state
+# ---------------------------------------------------------------------------
+**/logs/
+**/*.log
+**/airflow-*.pid
+
+# ---------------------------------------------------------------------------
+# CI/CD files (not needed inside images)
+# ---------------------------------------------------------------------------
+Jenkinsfile
+buildspec-*.yml
+.github/
+tag_creation.sh
+
+# ---------------------------------------------------------------------------
+# Documentation
+# ---------------------------------------------------------------------------
+infra/docs/
+infra/readme.md
+README.md
+
+# ---------------------------------------------------------------------------
+# Existing Dockerfiles (replaced by new ones in infra/docker/)
+# ---------------------------------------------------------------------------
+infra/Dockerfile
+infra/airflow/Dockerfile
+infra/airfloweks/Dockerfile
+slackbot/Dockerfile
+
+# ---------------------------------------------------------------------------
+# Kubernetes manifests (not needed inside images)
+# ---------------------------------------------------------------------------
+infra/k8s/
+infra/hosted-airflow/
+
+# ---------------------------------------------------------------------------
+# MWAA-specific files (not applicable to K8s container builds)
+# ---------------------------------------------------------------------------
+infra/airflow/scripts/mwaa_startup.sh
+infra/airflow/mwaa_requirements_*.txt
+infra/airflow/dags/requirements_mwaa_*.txt
+buildspec-*.yml
+
+# ---------------------------------------------------------------------------
+# Slackbot (excluded from Airflow image builds)
+# Only included when building Dockerfile.slackbot
+# Override with: docker build --build-arg ... (not needed; Docker uses context)
+# The slackbot Dockerfile COPY is specific so other content is ignored anyway.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Large files not needed in any image build
+# ---------------------------------------------------------------------------
+infra/docker/vendor/oracle/

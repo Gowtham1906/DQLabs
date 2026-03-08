@@ -1,0 +1,48 @@
+# =============================================================================
+# DQLabs Airflow – ML / NLP Stack Requirements
+# Used by: semantic-worker ONLY
+# =============================================================================
+# Install order in Dockerfile:
+#   1. torch (installed separately first for layer caching — ~900 MB)
+#   2. This file (all remaining ML packages)
+#
+# Air-gap note: Override PYTORCH_INDEX_URL build arg to a private mirror.
+# For en_core_web_sm, pre-download the .whl to vendor/wheels/ and install
+# via --find-links instead of the GitHub URL below.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# LangChain ecosystem
+# ---------------------------------------------------------------------------
+langchain==0.3.26
+langchain-core==0.3.80
+langchain-community==0.3.27
+langchain-openai==0.3.25
+langgraph-checkpoint-postgres==2.0.22
+openai>=1.86.0,<2.0.0
+
+# ---------------------------------------------------------------------------
+# NLP / Text processing
+# ---------------------------------------------------------------------------
+spacy==3.8.0
+# SpaCy English model — for air-gap replace with --find-links wheel
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
+sentence-transformers==4.0.1
+fuzzywuzzy==0.18.0
+RapidFuzz==3.12.2
+gensim==4.3.3
+
+# ---------------------------------------------------------------------------
+# Transformers (depends on torch, installed separately in Dockerfile)
+# ---------------------------------------------------------------------------
+transformers>=4.50.0
+
+# ---------------------------------------------------------------------------
+# Computer vision (headless — no display required)
+# ---------------------------------------------------------------------------
+opencv-python-headless
+
+# ---------------------------------------------------------------------------
+# Catalog / Data governance integrations
+# ---------------------------------------------------------------------------
+pyatlan==6.2.0

@@ -1,0 +1,282 @@
+# =============================================================================
+# DQLabs Airflow – Local Development Stack
+#
+# HOW TO RUN:
+#   1. cp infra/docker/env.example infra/docker/.env
+#   2. Edit infra/docker/.env  (fill in all required values)
+#   3. From repo root:
+#        docker compose -f infra/docker/docker-compose.yml up --build
+#
+# SERVICES:
+#   postgres           PostgreSQL 15   – Airflow metadata database
+#   redis              Redis 7         – Celery broker
+#   airflow-init       One-shot        – DB migrate + admin user creation
+#   airflow-webserver  port 8080       – Airflow UI
+#   airflow-scheduler                  – DAG scheduling
+#   airflow-worker                     – Celery task executor
+#   airflow-triggerer                  – Deferred operators
+#
+# VOLUMES (local dev):
+#   DAGs and plugins are LIVE-MOUNTED — edit code without rebuilding the image.
+#   Remove the volume mounts for CI/CD; the baked-in image copies are used instead.
+# =============================================================================
+
+x-airflow-common: &airflow-common
+  build:
+    context: ../..                         # repository root
+    dockerfile: infra/docker/Dockerfile
+  image: dqlabs-airflow:local
+  env_file:
+    - .env                                 # copy from env.example
+  environment:
+    # ── Core ──────────────────────────────────────────────────────────────────
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+    AIRFLOW__CORE__PARALLELISM: 32
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 16
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 4
+
+    # ── Metadata database ─────────────────────────────────────────────────────
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD}@postgres:5432/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: 10
+    AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: 20
+
+    # ── Celery ────────────────────────────────────────────────────────────────
+    AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: >-
+      db+postgresql://airflow:${AIRFLOW_POSTGRES_PASSWORD}@postgres:5432/airflow
+
+    # ── Webserver ─────────────────────────────────────────────────────────────
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+    AIRFLOW__WEBSERVER__RBAC: "true"
+    AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: "300"
+    AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+    AIRFLOW__LOGGING__FAB_LOGGING_LEVEL: WARN
+
+    # ── Performance ───────────────────────────────────────────────────────────
+    # Increase import timeout — ML packages (torch/langchain) load slowly
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "300"
+
+    # ── DQLabs app env vars ───────────────────────────────────────────────────
+    AIRFLOW_HOME: /opt/airflow
+    POSTGRESQL_DB_NAME: ${POSTGRESQL_DB_NAME}
+    POSTGRESQL_USER_NAME: ${POSTGRESQL_USER_NAME}
+    POSTGRESQL_PASSWORD: ${POSTGRESQL_PASSWORD}
+    POSTGRESQL_HOST: ${POSTGRESQL_HOST}
+    POSTGRESQL_PORT: ${POSTGRESQL_PORT:-5432}
+    DEBUG: ${DEBUG:-false}
+    LOG_BACKUP_COUNT: ${LOG_BACKUP_COUNT:-10}
+    SECRET_KEY: ${SECRET_KEY}
+    CLIENT_NAME: ${CLIENT_NAME:-dqlabs}
+    PYTHONPATH: /opt/airflow/dags
+
+    # ── Entrypoint tuning ─────────────────────────────────────────────────────
+    DB_CHECK_RETRIES: "30"
+    DB_CHECK_INTERVAL: "5"
+
+    # ── Celery worker – dumb-init process group (harmless on non-worker services) ──
+    DUMB_INIT_SETSID: "0"
+
+  volumes:
+    # Live-mount for local development (override baked-in image copies)
+    - ../../infra/airflow/dags:/opt/airflow/dags
+    - ../../infra/airflow/plugins:/opt/airflow/plugins
+    - ../../infra/airflow/jars:/opt/airflow/jars
+    # Airflow Variables auto-loaded by the entrypoint on scheduler start
+    - ../../infra/airflow/plugins/dq_variables.json:/opt/airflow/config/airflow-variables.json:ro
+    # Persistent logs
+    - airflow-logs:/opt/airflow/logs
+
+  networks:
+    - dqlabs-net
+
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+
+services:
+
+  # ── PostgreSQL – Airflow metadata database ───────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: dqlabs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"          # 5433 on host to avoid conflict with a local Postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - dqlabs-net
+
+  # ── Redis – Celery broker ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: dqlabs-redis
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - dqlabs-net
+
+  # ── Airflow Init – one-shot DB setup ─────────────────────────────────────────
+  # Runs airflow db migrate, creates the admin user, then exits cleanly.
+  # All other services depend on this completing successfully.
+  airflow-init:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-init
+    # Point to an empty dags folder so db migrate/users create don't scan real DAGs
+    # (heavy ML imports cause 30s timeouts per file, making init take 10+ minutes)
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /tmp/empty_dags
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        echo "==> Running DB migrations..."
+        airflow db migrate
+
+        echo "==> Creating admin user (skipped if already exists)..."
+        airflow users create \
+          --username  "${AIRFLOW_ADMIN_USER:-admin}" \
+          --firstname "Admin" \
+          --lastname  "User" \
+          --role      "Admin" \
+          --email     "${AIRFLOW_ADMIN_EMAIL:-admin@dqlabs.io}" \
+          --password  "${AIRFLOW_ADMIN_PASSWORD:-admin}" 2>/dev/null \
+          || echo "Admin user already exists – skipping."
+
+        echo "==> Importing Airflow Variables from dq_variables.json..."
+        airflow variables import /opt/airflow/config/airflow-variables.json \
+          2>/dev/null || echo "Variables import skipped (file not found or empty)."
+
+        echo "==> Init complete."
+    restart: "no"
+
+  # ── Airflow Webserver – UI (http://localhost:8080) ───────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-webserver
+    restart: unless-stopped
+    command: ["airflow", "webserver"]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Scheduler ─────────────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-scheduler
+    restart: unless-stopped
+    command: ["airflow", "scheduler"]
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'airflow jobs check --job-type SchedulerJob --hostname "$$(hostname)"'
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 90s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Celery Worker ─────────────────────────────────────────────────────
+  airflow-worker:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-worker
+    restart: unless-stopped
+    command: ["airflow", "celery", "worker"]
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 90s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Triggerer – deferred operators ────────────────────────────────────
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: dqlabs-airflow-triggerer
+    restart: unless-stopped
+    command: ["airflow", "triggerer"]
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'airflow jobs check --job-type TriggererJob --hostname "$$(hostname)"'
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 90s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+
+volumes:
+  postgres-data:
+    driver: local
+  airflow-logs:
+    driver: local
+
+
+networks:
+  dqlabs-net:
+    driver: bridge

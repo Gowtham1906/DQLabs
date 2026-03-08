@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: airflow
+  labels:
+    service: airflow-scheduler
+    version: v1
+spec:
+  # replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 5%
+  selector:
+    matchLabels:
+      service: airflow-scheduler
+      version: v1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5432"
+      labels:
+        service: airflow-scheduler
+        version: v1
+        app: airflow-scheduler
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: service
+                      operator: In
+                      values:
+                        - redis
+                topologyKey: "kubernetes.io/hostname"
+              weight: 100
+      securityContext:
+        fsGroup: 100
+      containers:
+        - name: airflow-scheduler
+          image: 655275087384.dkr.ecr.us-east-1.amazonaws.com/dqlabs-airflow:76.77
+          imagePullPolicy: Always
+          command: ["airflow", "scheduler"]
+          ports:
+            - name: scheduler-port
+              containerPort: 8083
+          resources:
+            limits:
+              memory: 3Gi
+              cpu: "2"
+            requests:
+              memory: 500Mi
+              cpu: 250m
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: 'CeleryExecutor'
+            - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+              value: 'postgresql+psycopg2://dqlabs:Intel1234@postgres.airflow.svc.cluster.local/DQLABS'
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              value: 'db+postgresql://dqlabs:Intel1234@postgres.airflow.svc.cluster.local/DQLABS'
+            - name: AIRFLOW__CELERY__BROKER_URL
+              value: 'amqp://admin:admin@rabbitmq.airflow.svc.cluster.local:5672/'
+            - name: CELERY__BROKER_URL
+              value: 'amqp://admin:admin@rabbitmq.airflow.svc.cluster.local:5672/'
+            - name: AIRFLOW__CORE__FERNET_KEY
+              value: ''
+            - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+              value: 'true'
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: 'False'
+            - name: AIRFLOW__API__AUTH_BACKEND
+              value: 'airflow.api.auth.backend.basic_auth'
+          volumeMounts:
+            - name: plugins
+              mountPath: /opt/airflow/plugins
+            - name: data
+              mountPath: /opt/airflow/data
+      volumes:
+        - name: dags
+          hostPath:
+            path: /dags
+        - name: resources
+          hostPath:
+            path: /resources
+        - name: logs
+          hostPath:
+            path: /logs
+        - name: plugins
+          hostPath:
+            path: /plugins
+        - name: data
+          hostPath:
+            path: /data
+        - name: cache-volume
+          emptyDir: {}

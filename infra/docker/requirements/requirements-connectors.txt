@@ -1,0 +1,55 @@
+# =============================================================================
+# DQLabs Airflow – Connector Wheels Requirements
+# Used by: worker, semantic-worker
+# =============================================================================
+# These proprietary wheels are NOT available on public PyPI.
+# They must be pre-downloaded to infra/docker/vendor/wheels/ before docker build.
+#
+# CI workflow (GitHub Actions) is responsible for populating vendor/wheels/
+# from the appropriate source (S3 bucket, Git LFS, or internal artifact store).
+#
+# Install command in Dockerfile:
+#   pip install --find-links /tmp/wheels --no-index -r requirements-connectors.txt
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# DQLabs core package
+# ---------------------------------------------------------------------------
+dqlabs==3.0
+
+# ---------------------------------------------------------------------------
+# DQLabs connector packages (30+ data source connectors)
+# ---------------------------------------------------------------------------
+dqlabs_connectors-adf==1.0.0
+dqlabs-connectors-airflow==1.0.0
+dqlabs-connectors-athena==1.0.0
+dqlabs-connectors-bigquery==1.0.0
+dqlabs-connectors-databricks==1.0.0
+dqlabs-connectors-db2==1.0.0
+dqlabs-connectors-db2ibm==1.0.0
+dqlabs-connectors-dbt==1.0.0
+dqlabs-connectors-denodo==1.0.0
+dqlabs-connectors-emr-spark==1.0.0
+dqlabs-connectors-fivetran==1.0.0
+dqlabs-connectors-hive==1.0.0
+dqlabs-connectors-mssql==1.0.0
+dqlabs-connectors-oracle==1.0.0
+dqlabs-connectors-postgresql==1.0.0
+dqlabs-connectors-powerbi==1.0.1
+dqlabs-connectors-redshift-spectrum==1.0.0
+dqlabs-connectors-redshift==1.0.0
+dqlabs-connectors-s3select==1.0.0
+dqlabs-connectors-saphana==1.0.0
+dqlabs-connectors-tableau==1.0.0
+dqlabs-connectors-talend==1.0.0
+dqlabs-connectors-teradata==1.0.0
+dqlabs-connectors-wherescape==1.0.0
+dqlabs-connectors-snowflake==1.0.0
+dqlabs-connectors-mysql==1.0.0
+dqlabs-connectors-alloydb==1.0.0
+dqlabs-connectors-synapse==1.0.0
+dqlabs-connectors-adls==1.0.0
+dqlabs-connectors-mulesoft==1.0.0
+dqlabs_connectors-file==1.0.0
+dqlabs_connectors-salesforce==1.0.0
+dqlabs_connectors-spark==1.0.0

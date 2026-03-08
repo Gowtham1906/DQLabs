@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+  labels:
+    app.kubernetes.io/name: dq
+  name: dqlabs-server
+  namespace: airflow
+spec:
+  ingressClassName: nginx
+  defaultBackend:
+    service:
+      name: dqlabs-server-int
+      port:
+        number: 8000
+  rules:
+    - host: backend.dqlabsai.net
+      http:
+        paths:
+          - backend:
+              service:
+                name: dqlabs-server-int
+                port:
+                  number: 8000
+            path: /api
+            pathType: ImplementationSpecific

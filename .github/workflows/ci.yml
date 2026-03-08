@@ -1,0 +1,301 @@
+# =============================================================================
+# DQLabs Airflow — Repo 1 App Build Pipeline
+#
+# PIPELINE ORDER (fail-fast):
+#   1. SAST  — Semgrep   : scans source code, fails on CRITICAL
+#   2. Build             : docker build (no push yet), tagged with git SHA
+#   3. Trivy             : image scan → vulnerability report + SBOM
+#                          fails on CRITICAL CVE → no push
+#   4. Push to GHCR      : only reached if steps 1–3 all pass
+#
+# REGISTRY (testing):
+#   GitHub Container Registry — ghcr.io
+#   No external secrets needed — uses the built-in GITHUB_TOKEN.
+#   Image: ghcr.io/<org>/dqlabs-airflow:<sha>
+#
+#   NOTE: Switch REGISTRY + login step to ECR for production.
+#         ECR setup is in comments labelled [ECR].
+#
+# TRIGGERS:
+#   push  → main, dev, qa, uat, staging, prod   (builds + pushes)
+#   PR    → any of the above branches            (builds + scans, no push)
+#
+# REQUIRED SECRETS:
+#   GITHUB_TOKEN     – built-in, no configuration needed
+#   SEMGREP_APP_TOKEN – (optional) Semgrep Cloud dashboard; pipeline runs without it
+# =============================================================================
+
+name: CI — SAST · Build · Trivy · Push
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - qa
+      - uat
+      - staging
+      - prod
+  pull_request:
+    branches:
+      - main
+      - dev
+      - qa
+      - uat
+      - staging
+      - prod
+
+# Cancel in-progress runs for the same branch/PR (saves runner minutes)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ── Registry (GHCR for testing) ───────────────────────────────────────────
+  REGISTRY:        ghcr.io
+  IMAGE_NAME:      dqlabs-airflow
+  # Full image base: ghcr.io/<org>/dqlabs-airflow
+  # Final tag appended per job: :<sha> or :<branch>
+  #
+  # [ECR] To switch to ECR, replace the three lines above with:
+  #   REGISTRY:   655275087384.dkr.ecr.us-east-1.amazonaws.com
+  #   IMAGE_NAME: dqlabs-airflow
+  #   AWS_REGION: us-east-1
+  # And replace the "Log in to GHCR" step with the ECR login steps (see comments).
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1 — SAST: Semgrep source-code scan
+# Scans Python DAG code, dqlabs package, and any config files.
+# Fails the pipeline if a CRITICAL severity finding is detected.
+# Results are uploaded to GitHub Security tab (SARIF).
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  sast:
+    name: "1 · SAST — Semgrep"
+    runs-on: ubuntu-latest
+    permissions:
+      contents:        read
+      security-events: write   # required to upload SARIF to GitHub Security tab
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          # Rule packs:
+          #   p/python        — generic Python security best practices
+          #   p/secrets       — hardcoded API keys, tokens, passwords
+          #   p/owasp-top-ten — OWASP Top 10 (SQLi, XSS, SSRF, etc.)
+          config: >-
+            p/python
+            p/secrets
+            p/owasp-top-ten
+          generateSarif: "1"
+          # auditOn: push   ← uncomment to report findings without blocking the build
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()   # upload even when Semgrep found issues so they show in Security tab
+        with:
+          sarif_file: semgrep.sarif
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 2 — Build → Trivy scan → Push to GHCR
+# Runs only after SAST passes.
+# Build is done once and loaded into the local Docker daemon (not pushed yet).
+# Trivy scans the local image. Only if Trivy passes does the image get pushed.
+# ─────────────────────────────────────────────────────────────────────────────
+  build-scan-push:
+    name: "2 · Build → Trivy → Push"
+    runs-on: ubuntu-latest
+    needs: sast
+    permissions:
+      contents:  read
+      packages:  write   # required to push to ghcr.io
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Compute image tags ────────────────────────────────────────────────
+      # SHA tag  : ghcr.io/<org>/dqlabs-airflow:a1b2c3d4
+      # Branch tag: ghcr.io/<org>/dqlabs-airflow:dev  (/ replaced with -)
+      - name: Compute image tags
+        id: tags
+        run: |
+          SHORT_SHA="${GITHUB_SHA::8}"
+          BRANCH_TAG="${GITHUB_REF_NAME//\//-}"
+          IMAGE_BASE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          FULL_IMAGE="${IMAGE_BASE}:${SHORT_SHA}"
+
+          echo "short_sha=${SHORT_SHA}"     >> "$GITHUB_OUTPUT"
+          echo "branch_tag=${BRANCH_TAG}"   >> "$GITHUB_OUTPUT"
+          echo "image_base=${IMAGE_BASE}"   >> "$GITHUB_OUTPUT"
+          echo "full_image=${FULL_IMAGE}"   >> "$GITHUB_OUTPUT"
+
+          echo "### Image Tags" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | Value |"                                         >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|-------|"                                         >> "$GITHUB_STEP_SUMMARY"
+          echo "| SHA tag    | \`${FULL_IMAGE}\`              |"        >> "$GITHUB_STEP_SUMMARY"
+          echo "| Branch tag | \`${IMAGE_BASE}:${BRANCH_TAG}\` |"      >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Log in to GitHub Container Registry ──────────────────────────────
+      # Uses the built-in GITHUB_TOKEN — no external secret required.
+      #
+      # [ECR] Replace this block with:
+      #   - name: Configure AWS credentials
+      #     uses: aws-actions/configure-aws-credentials@v4
+      #     with:
+      #       aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #       aws-region:            ${{ env.AWS_REGION }}
+      #   - name: Log in to Amazon ECR
+      #     uses: aws-actions/amazon-ecr-login@v2
+      - name: Log in to GitHub Container Registry (ghcr.io)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Docker Buildx setup (layer caching) ───────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Step 2: Docker Build (load to local daemon — not pushed yet) ──────
+      # Layers are cached in GitHub Actions cache.
+      # The image is NOT pushed here — Trivy must pass first.
+      - name: Build Docker image (local only)
+        uses: docker/build-push-action@v5
+        with:
+          context:    .
+          file:       infra/docker/Dockerfile
+          push:       false
+          load:       true      # load into local Docker daemon for Trivy to scan
+          tags: |
+            ${{ steps.tags.outputs.full_image }}
+            ${{ steps.tags.outputs.image_base }}:${{ steps.tags.outputs.branch_tag }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          build-args: |
+            AIRFLOW_VERSION=2.8.1
+            PYTHON_VERSION=3.11
+            INSTALL_ML_STACK=true
+
+      # ── Step 3a: Trivy — fail fast on CRITICAL CVEs ───────────────────────
+      # exits 1 → pipeline stops, push step never runs
+      - name: Trivy — fail on CRITICAL CVE
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref:      ${{ steps.tags.outputs.full_image }}
+          format:         table
+          exit-code:      "1"
+          ignore-unfixed: true
+          vuln-type:      os,library
+          severity:       CRITICAL
+
+      # ── Step 3b: Trivy — full report (JSON + HTML) ────────────────────────
+      # always() so the report is saved even when the CRITICAL check above fails
+      - name: Trivy — generate JSON vulnerability report
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          image-ref:      ${{ steps.tags.outputs.full_image }}
+          format:         json
+          output:         trivy-report.json
+          ignore-unfixed: true
+          vuln-type:      os,library
+          severity:       CRITICAL,HIGH
+
+      - name: Trivy — generate HTML vulnerability report
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          image-ref:      ${{ steps.tags.outputs.full_image }}
+          format:         template
+          template:       "@/contrib/html.tpl"
+          output:         trivy-report.html
+          ignore-unfixed: true
+          vuln-type:      os,library
+          severity:       CRITICAL,HIGH
+
+      # ── Step 3c: Trivy — SBOM (CycloneDX) ────────────────────────────────
+      - name: Trivy — generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.tags.outputs.full_image }}
+          format:    cyclonedx
+          output:    sbom-${{ steps.tags.outputs.short_sha }}.cdx.json
+
+      # ── Upload artifacts ──────────────────────────────────────────────────
+      - name: Upload vulnerability report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name:           trivy-vuln-report-${{ steps.tags.outputs.short_sha }}
+          path: |
+            trivy-report.json
+            trivy-report.html
+          retention-days: 30
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name:           sbom-cyclonedx-${{ steps.tags.outputs.short_sha }}
+          path:           sbom-${{ steps.tags.outputs.short_sha }}.cdx.json
+          retention-days: 90
+
+      # ── Trivy summary ─────────────────────────────────────────────────────
+      - name: Write Trivy summary
+        if: always()
+        run: |
+          echo "## Trivy Scan Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Detail |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image scanned      | \`${{ steps.tags.outputs.full_image }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Severities checked | CRITICAL, HIGH |"                            >> "$GITHUB_STEP_SUMMARY"
+          echo "| Unfixed CVEs       | ignored |"                                   >> "$GITHUB_STEP_SUMMARY"
+          echo "| SBOM format        | CycloneDX |"                                 >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Vulnerability report and SBOM are attached as build artifacts."     >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Step 4: Push to GHCR ─────────────────────────────────────────────
+      # Only reached when:
+      #   Job 1  — Semgrep found no CRITICAL
+      #   Step 2 — Docker build succeeded
+      #   Step 3a — Trivy found no CRITICAL CVE
+      #
+      # PRs: scan runs but image is NOT pushed (github.event_name == 'pull_request')
+      - name: Push image to GHCR
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v5
+        with:
+          context:    .
+          file:       infra/docker/Dockerfile
+          push:       true
+          tags: |
+            ${{ steps.tags.outputs.full_image }}
+            ${{ steps.tags.outputs.image_base }}:${{ steps.tags.outputs.branch_tag }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          build-args: |
+            AIRFLOW_VERSION=2.8.1
+            PYTHON_VERSION=3.11
+            INSTALL_ML_STACK=true
+
+      - name: Write push summary
+        if: github.event_name == 'push'
+        run: |
+          echo "## Image Pushed to GHCR" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | Image |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| SHA    | \`${{ steps.tags.outputs.full_image }}\` |"                                             >> "$GITHUB_STEP_SUMMARY"
+          echo "| Branch | \`${{ steps.tags.outputs.image_base }}:${{ steps.tags.outputs.branch_tag }}\` |"       >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pull with: \`docker pull ${{ steps.tags.outputs.full_image }}\`" >> "$GITHUB_STEP_SUMMARY"

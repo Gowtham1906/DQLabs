@@ -1,0 +1,47 @@
+# ── Secrets / credentials ─────────────────────────────────────────────────
+.env
+*.env
+!env.example
+infra/docker/.env
+environments/
+connection_file/
+
+# ── K8s secrets (contain real certs/keys — manage via Vault or Sealed Secrets) ──
+infra/k8s/airflow/deployment/sslsecret.yml
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+*.egg
+
+# ── Vendor wheels (populated from artifact store before prod build) ────────
+infra/docker/vendor/wheels/*.whl
+
+# ── Airflow runtime ───────────────────────────────────────────────────────
+infra/airflow/logs/
+infra/airflow/airflow.db
+airflow.db
+airflow-webserver.pid
+
+# ── Docker ────────────────────────────────────────────────────────────────
+infra/docker/postgres-data/
+
+# ── Claude internal ───────────────────────────────────────────────────────
+.claude/
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
