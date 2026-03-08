@@ -1,0 +1,15 @@
+# =============================================================================
+# Trivy – Accepted / Deferred CVEs
+#
+# Format:
+#   <CVE-ID>   # reason + tracking note
+#
+# Review this file on every base image upgrade.
+# Remove entries once the base image ships the fix.
+# =============================================================================
+
+# CVE-2025-68121  ─ Go crypto/tls unexpected session resumption
+# Location : Go runtime binaries inside apache/airflow:2.8.1-python3.11 base image
+# Fix      : Go 1.24.13 / 1.25.7 — not yet in the Airflow base image
+# Action   : Re-evaluate when upgrading to apache/airflow:2.10+ or a newer base image
+CVE-2025-68121

@@ -70,8 +70,9 @@ jobs:
     name: "Build → Trivy → Push"
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      packages: write   # required to push to ghcr.io
+      contents:        read
+      packages:        write   # push to ghcr.io
+      security-events: write   # upload Trivy SARIF to GitHub Security tab
 
     steps:
       - name: Checkout code
@@ -145,7 +146,9 @@ jobs:
             INSTALL_ML_STACK=true
 
       # ── Step 2a: Trivy — fail on CRITICAL CVE ────────────────────────────
-      # exit-code: 1 → pipeline stops here, push never runs
+      # exit-code: 1 → pipeline stops here, push never runs.
+      # .trivyignore suppresses accepted/deferred CVEs (e.g. base-image issues
+      # with no fix available in the current upstream release).
       - name: Trivy — fail on CRITICAL CVE
         uses: aquasecurity/trivy-action@master
         with:
@@ -153,11 +156,13 @@ jobs:
           format:         table
           exit-code:      "1"
           ignore-unfixed: true
+          trivyignores:   .trivyignore
           vuln-type:      os,library
           severity:       CRITICAL
 
-      # ── Step 2b: Trivy — full vulnerability report (JSON + HTML) ─────────
-      # always() ensures the report is saved even when step 2a fails
+      # ── Step 2b: Trivy — JSON vulnerability report ───────────────────────
+      # always() ensures the report is saved even when step 2a fails.
+      # Covers CRITICAL + HIGH. Download from Actions → Artifacts.
       - name: Trivy — generate JSON vulnerability report
         uses: aquasecurity/trivy-action@master
         if: always()
@@ -166,28 +171,39 @@ jobs:
           format:         json
           output:         trivy-report.json
           ignore-unfixed: true
+          trivyignores:   .trivyignore
           vuln-type:      os,library
           severity:       CRITICAL,HIGH
 
-      - name: Trivy — generate HTML vulnerability report
+      # ── Step 2c: Trivy — SARIF report → GitHub Security tab ──────────────
+      # SARIF replaces the old HTML template (removed in Trivy v0.50+).
+      # Results appear in Security → Code scanning alerts in the GitHub UI.
+      - name: Trivy — generate SARIF report
         uses: aquasecurity/trivy-action@master
         if: always()
         with:
           image-ref:      ${{ steps.tags.outputs.full_image }}
-          format:         template
-          template:       "@/contrib/html.tpl"
-          output:         trivy-report.html
+          format:         sarif
+          output:         trivy-report.sarif
           ignore-unfixed: true
+          trivyignores:   .trivyignore
           vuln-type:      os,library
           severity:       CRITICAL,HIGH
 
-      # ── Step 2c: Trivy — SBOM (CycloneDX) ────────────────────────────────
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-report.sarif
+
+      # ── Step 2d: Trivy — SBOM (CycloneDX) ────────────────────────────────
       - name: Trivy — generate SBOM (CycloneDX)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ steps.tags.outputs.full_image }}
-          format:    cyclonedx
-          output:    sbom-${{ steps.tags.outputs.short_sha }}.cdx.json
+          image-ref:    ${{ steps.tags.outputs.full_image }}
+          format:       cyclonedx
+          output:       sbom-${{ steps.tags.outputs.short_sha }}.cdx.json
+          trivyignores: .trivyignore
 
       # ── Upload artifacts ──────────────────────────────────────────────────
       - name: Upload vulnerability report
@@ -197,7 +213,7 @@ jobs:
           name:           trivy-vuln-report-${{ steps.tags.outputs.short_sha }}
           path: |
             trivy-report.json
-            trivy-report.html
+            trivy-report.sarif
           retention-days: 30
 
       - name: Upload SBOM
