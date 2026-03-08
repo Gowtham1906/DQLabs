@@ -24,6 +24,12 @@ build/
 # ── Vendor wheels (populated from artifact store before prod build) ────────
 infra/docker/vendor/wheels/*.whl
 
+# ── Large binary drivers (56 MB — download from artifact store before build) ─
+# Files exist locally but are NOT committed. The Dockerfile handles their absence.
+infra/airflow/jars/*.jar
+infra/airflow/jars/*.tar.gz
+infra/airflow/jars/*.gz
+
 # ── Airflow runtime ───────────────────────────────────────────────────────
 infra/airflow/logs/
 infra/airflow/airflow.db

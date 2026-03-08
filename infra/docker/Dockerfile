@@ -87,26 +87,41 @@ ENV ORACLE_HOME=/opt/oracle/instantclient_21_7
 ENV ORACLE_DRIVER_PATH=/opt/oracle/instantclient_21_7
 ENV LD_LIBRARY_PATH="/opt/oracle/instantclient_21_7:${LD_LIBRARY_PATH}"
 
-# ── 4. Denodo ODBC Driver (from local jars/) ─────────────────────────────────
-# Extracted path: /opt/denodo/denodo-vdp-odbcdriver-linux/lib/unixodbc_x64/
-# Must match Driver= path in infra/docker/odbcinst.ini
-COPY infra/airflow/jars/denodo-vdp-odbcdriver-linux.tar.gz /tmp/denodo-odbc.tar.gz
-RUN mkdir -p /opt/denodo \
-    && tar -xzf /tmp/denodo-odbc.tar.gz -C /opt/denodo \
-    && rm /tmp/denodo-odbc.tar.gz \
-    && ldconfig
+# ── 4 & 5. Denodo ODBC Driver + JDBC JARs (all optional, skip if absent) ─────
+# Copy the entire jars/ directory once. Individual files may be absent in CI
+# (large binaries are not committed). Each install step checks before executing.
+# Populate infra/airflow/jars/ from your artifact store before a production build.
+COPY infra/airflow/jars/ /tmp/jars/
 
-# ── 5. JDBC Drivers (Spark / Databricks / DB2 / Teradata / Denodo) ───────────
+# Denodo ODBC driver — extracted path must match Driver= in odbcinst.ini
+RUN if [ -f "/tmp/jars/denodo-vdp-odbcdriver-linux.tar.gz" ]; then \
+        echo "==> Installing Denodo ODBC driver..." \
+        && mkdir -p /opt/denodo \
+        && tar -xzf /tmp/jars/denodo-vdp-odbcdriver-linux.tar.gz -C /opt/denodo \
+        && ldconfig; \
+    else \
+        echo "==> WARNING: denodo-vdp-odbcdriver-linux.tar.gz not found — skipping Denodo ODBC."; \
+    fi
+
+# JDBC JARs (Spark / Databricks / DB2 / Teradata / Denodo)
 RUN mkdir -p /opt/airflow/jars
-COPY infra/airflow/jars/*.jar /opt/airflow/jars/
-RUN chown -R airflow:root /opt/airflow/jars && chmod -R 755 /opt/airflow/jars
+RUN if ls /tmp/jars/*.jar 2>/dev/null | grep -q .; then \
+        echo "==> Installing JDBC JARs..." \
+        && cp /tmp/jars/*.jar /opt/airflow/jars/ \
+        && chown -R airflow:root /opt/airflow/jars \
+        && chmod -R 755 /opt/airflow/jars; \
+    else \
+        echo "==> WARNING: No JAR files found in infra/airflow/jars/ — skipping JDBC drivers."; \
+    fi
 
-# ── 6. Register Denodo ODBC driver ───────────────────────────────────────────
+# ── 6. Register Denodo ODBC driver (only if it was installed above) ───────────
 # We APPEND to /etc/odbcinst.ini rather than replacing it.
 # The MSSQL ODBC apt package writes its own entry to that file — overwriting it
 # would silently break SQL Server connectivity.
-RUN printf '\n[DenodoODBCDriver]\nDescription=ODBC driver of Denodo\nDriver=/opt/denodo/denodo-vdp-odbcdriver-linux/lib/unixodbc_x64/denodoodbc.so\nUsageCount=1\n' \
-    >> /etc/odbcinst.ini
+RUN if [ -d "/opt/denodo/denodo-vdp-odbcdriver-linux" ]; then \
+        printf '\n[DenodoODBCDriver]\nDescription=ODBC driver of Denodo\nDriver=/opt/denodo/denodo-vdp-odbcdriver-linux/lib/unixodbc_x64/denodoodbc.so\nUsageCount=1\n' \
+            >> /etc/odbcinst.ini; \
+    fi
 
 # ── 7. Entrypoint script ──────────────────────────────────────────────────────
 COPY infra/docker/scripts/entrypoint.sh /entrypoint.sh
