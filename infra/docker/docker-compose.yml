@@ -28,7 +28,7 @@ x-airflow-common: &airflow-common
   image: dqlabs-airflow:local
   env_file:
     - .env                                 # copy from env.example
-  environment:
+  environment: &airflow-common-env
     # ── Core ──────────────────────────────────────────────────────────────────
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
@@ -55,7 +55,12 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
     AIRFLOW__WEBSERVER__RBAC: "true"
     AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: "300"
-    AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+    AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "600"
+    # Use 1 gthread worker (threads share memory) — prevents OOM on resource-limited hosts.
+    # 4 sync workers × heavy ML imports = Docker Desktop OOM crash.
+    AIRFLOW__WEBSERVER__WORKERS: "1"
+    AIRFLOW__WEBSERVER__WORKER_CLASS: "gthread"
+    AIRFLOW__WEBSERVER__WORKER_THREADS: "4"
 
     # ── Logging ───────────────────────────────────────────────────────────────
     AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
@@ -155,6 +160,7 @@ services:
     # Point to an empty dags folder so db migrate/users create don't scan real DAGs
     # (heavy ML imports cause 30s timeouts per file, making init take 10+ minutes)
     environment:
+      <<: *airflow-common-env
       AIRFLOW__CORE__DAGS_FOLDER: /tmp/empty_dags
     entrypoint: /bin/bash
     command:
@@ -192,9 +198,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 45s
+      timeout: 30s
+      retries: 10
+      start_period: 900s
     depends_on:
       postgres:
         condition: service_healthy
