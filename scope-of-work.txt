@@ -1,0 +1,286 @@
+1. Scope of Work
+ 
+1.1 Containerized Application Stack
+Vendor will containerize and package:
+Django application
+Airflow (webserver, scheduler, workers)
+PostgreSQL (Primary + Read Replica topology)
+PgBouncer (connection pooling proxy)
+ 
+All components will be deployable via Helm.
+ 
+Deliverables:
+Hardened Dockerfiles
+Non-root runtime containers
+Minimal base images
+Multi-stage builds
+Version-pinned dependencies
+ 
+1.2 PostgreSQL HA Architecture (Containerized) Architecture Overview
+The deployment will support:
+PostgreSQL Primary
+PostgreSQL Read Replica (streaming replication)
+PgBouncer for connection pooling
+Persistent volumes for data durability
+ 
+Supported deployment patterns:
+StatefulSets for Postgres
+Synchronous or asynchronous replication (configurable)
+Anti-affinity rules for HA
+PodDisruptionBudgets
+ 
+Optional:
+Patroni-based HA (if agreed)
+Bitnami or equivalent HA Postgres chart pattern
+ 
+PostgreSQL Deliverables
+Helm templates for:
+Primary
+Replica(s)
+Replication configuration
+Storage class configuration
+WAL archiving configuration (optional)
+Replication user setup
+Automatic replica join configuration
+Backup configuration hooks
+PgBouncer Integration
+ 
+PgBouncer will:
+Run as separate deployment
+Route connections to:
+Primary for write
+Replica for read (if application supports read splitting)
+Pool size configurable
+Connection limits enforced
+ 
+PgBouncer Deliverables:
+Helm configuration
+Secure credential management
+TLS support between PgBouncer and Postgres
+Pool monitoring metrics
+ 
+Acceptance Criteria:
+Replica successfully replicates from primary
+Failover scenario documented
+PgBouncer limits active connections
+Application connects via PgBouncer endpoint
+ 
+1.3 Multi-Tenant Architecture
+ 
+Tenant model: Namespace-per-tenant (We have most of this config today but a review and optimizations are needed)
+ 
+Each tenant includes:
+Dedicated namespace
+Dedicated Postgres schema or DB
+Dedicated PgBouncer config
+Dedicated secrets
+Resource quotas
+Network policies
+ 
+Postgres tenancy patterns:
+Database per tenant (stronger isolation) - this is already in place today with SaaS
+ 
+Deliverables:
+Tenant Helm parameterization
+Tenant DB bootstrap script
+Isolation documentation
+ 
+Acceptance Criteria:
+Two tenants operate without DB cross-access
+PgBouncer pool separation verified
+ 
+1.4 Kubernetes Deployment (Cloud + On-Prem)
+Supported environments:
+AWS EKS
+Azure AKS
+GCP GKE
+On-prem (kubeadm, Rancher, OpenShift-compatible)
+ 
+Postgres storage configurable via:
+CSI drivers
+Longhorn
+Ceph
+vSphere CSI
+Cloud block storage
+ 
+Deliverables:
+Cloud architecture guide
+On-prem architecture guide
+Storage configuration matrix
+ 
+Acceptance Criteria:
+Postgres persists data across pod restarts
+Replica scheduled on separate node (anti-affinity)
+ 
+1.5 Vulnerability Management & Security
+Security controls apply to:
+Django
+Airflow
+Postgres
+PgBouncer
+Base OS layers
+ 
+Build-Time Controls:
+Image scanning (Trivy or equivalent)
+Python dependency scanning
+SBOM generation
+CVE severity report
+ 
+Runtime Controls:
+Non-root containers
+Read-only filesystem where feasible
+Network policies
+TLS between services
+Encrypted persistent volumes (cluster dependent)
+ 
+SLA:
+Critical: 48 hours
+High: 5 business days
+Medium: Next release cycle
+ 
+ 
+Deliverables:
+Vulnerability management playbook
+SBOM per release
+Security hardening checklist
+ 
+Acceptance Criteria:
+No critical CVEs in release build.
+ 
+1.6 Secrets Management
+ 
+Secrets include:
+DB credentials
+Replication credentials
+PgBouncer credentials
+Django secret keys
+Airflow encryption keys
+ 
+Supported mechanisms:
+Kubernetes Secrets
+AWS Secrets Manager
+Azure Key Vault
+GCP Secret Manager
+On-prem Vault
+ 
+Deliverables:
+Secrets integration guide
+Secure credential rotation procedure
+ 
+1.7 Autoscaling
+ 
+Autoscaling configuration includes:
+ 
+Django:
+HPA (CPU-based)
+Configurable min/max replicas
+ 
+Airflow Workers:
+HPA based on:
+CPU
+Optional queue length
+PgBouncer:
+Horizontal scaling supported
+ 
+Postgres:
+Vertical scaling documented
+Read replicas scaled horizontally
+ 
+Acceptance Criteria:
+Load test validates scaling behavior.
+ 
+ 
+1.8 Observability & Monitoring
+Metrics collected for:
+ 
+Django:
+Request latency
+Error rate
+Throughput
+ 
+Airflow:
+DAG success/failure
+Task duration
+ 
+Postgres:
+Replication lag
+Active connections
+Query latency
+WAL size
+ 
+PgBouncer:
+Pool utilization
+Active connections
+Waiting clients
+ 
+Monitoring Stack:
+Prometheus
+Grafana
+Alertmanager
+ 
+Alerts include:
+Replica lag threshold
+Primary down
+Connection pool exhaustion
+Pod restarts
+High CPU/memory
+Disk pressure
+Certificate expiry
+ 
+Deliverables:
+Grafana dashboards
+Alert rules
+Admin remediation runbook
+ 
+Acceptance Criteria:
+Simulated failure triggers alerts
+Implementing RUM & Synthetic Moniroting
+SOP’s for configured alerts
+ 
+1.9 Air-Gapped / Limited Internet Deployment
+ 
+Vendor will provide:
+ 
+Offline bundle containing:
+Django, Airflow, Postgres, PgBouncer images
+Helm charts
+SBOM
+Checksums
+Installation scripts
+Upgrade guide
+ 
+Deployment requires:
+No internet access
+No public image pulls
+ 
+Acceptance Criteria:
+Deployment succeeds in fully disconnected environment.
+ 
+1.10 Version Management & Upgrades
+ 
+Versioning:
+Semantic Versioning (MAJOR.MINOR.PATCH)
+Image tags immutable
+Helm chart version aligned
+DB schema version documented
+ 
+Release artifacts:
+Images tar bundle
+Helm chart
+SBOM
+Checksums
+Release notes
+Compatibility matrix
+ 
+Upgrade Support:
+Helm upgrade procedure
+Rollback procedure
+DB migration validation
+Backup-before-upgrade process
+Postgres minor version upgrade guidance
+Replica re-sync procedure
+ 
+Acceptance Criteria:
+Minor version upgrade validated
+Rollback validated
+ 

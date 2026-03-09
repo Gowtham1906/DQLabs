@@ -1,0 +1,6 @@
+version: '3'
+services:
+  deployer:
+    image: 5fb5b09809b3
+    ports:
+      - "3000:3000"  # HTTPS

@@ -4,7 +4,7 @@ from copy import deepcopy
 from dqlabs.app_helper.dq_helper import get_client_domain
 from io import BytesIO
 import zipfile
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 import json
 
 class S3StorageService:
